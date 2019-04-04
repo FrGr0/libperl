@@ -85,10 +85,8 @@ sub DBClose {
 #creation d'une instance de log
 sub Log {
     my ($class, $log) = @_;
-    use File::Basename;
 
-    $log = "logs/".basename($log) if ($log);
-    $log = "logs/$0.log" if (!$log);
+    $log = "logs/".$0.".".Timestamp("%d%m%Y_%H%M%S").".log" if (!$log);
 
     my $self = bless {
         log => $log,
@@ -100,14 +98,14 @@ sub Log {
     return $self;
 }
 
-sub WriteLog {
+sub LogWrite {
     my ($self, $l) = @_;
     open( my $hdl, '>>', $self->{log} );
     print $hdl "[".Timestamp()."] $l\n";
     close($hdl);
 }
 
-sub CloseLog {
+sub LogClose {
     my ($self) = @_;
     open( my $hdl, '>>', $self->{log} );
     print $hdl "[".Timestamp()."] *** fermeture du log $0 ***\n";
@@ -117,12 +115,9 @@ sub CloseLog {
 #creation d'une instance de gestion de config (type INI)
 sub ConfigParser {
     my ($class, $cfg) = @_;
-    use File::Basename;
     use Text::ParseWords;
 
     my %config;
-
-    $cfg = "conf/".basename($cfg) if ($cfg);
     $cfg = "conf/$0.cfg" if (!$cfg);
 
     my $self = bless {
@@ -130,7 +125,7 @@ sub ConfigParser {
         conf => \%config
     }, $class;
 
-    my $Section = ""; #section vide par d?faut
+    my $Section = ""; #section vide par défaut
     my %KeyVal;
 
     open( my $conf_hfr, '<', $self->{file} );
@@ -142,8 +137,8 @@ sub ConfigParser {
             %{$self->{cfg}{$Section}}=();
         }
         else {
-            #on ne split que sur la 1ere occurence du caract?re "="
-            #les autres occurences doivent ?tre lues et renvoy?es par $this->read( x, x )
+            #on ne split que sur la 1ere occurence du caractère "="
+            #les autres occurences doivent être lues et renvoyées par $this->read( x, x )
 
             my @linetab = &parse_line( "=", 1, $_ );
             if ( @linetab ){
@@ -167,7 +162,7 @@ sub ConfigParser {
     return $self;
 }
 
-sub ConfRead {
+sub ConfigRead {
     my ($self, $section, $key, $defaut ) = @_;
     my $value;
 
@@ -193,7 +188,50 @@ sub ConfRead {
     return $value;
 }
 
-sub ConfDisplay {
+
+sub ConfigWrite {
+    my ( $self, $section, $key, $value ) = @_;
+
+    if ( exists $self->{cfg}{$section}) {
+
+        #print "la section $section existe !\n";
+        my %KeyVal = %{$self->{cfg}{$section}};
+        my $found = 0;
+        foreach my $k (keys %KeyVal) {
+            if ( $k eq $key ) {
+                $KeyVal{$key} = $value; #mise a jour de la valeur de la clé existante
+                $found = 1;
+            }
+        }
+        if ($found == 0) {
+            $KeyVal{$key} = $value; #création de la nouvelle clé
+        }
+
+        %{$self->{cfg}{$section}} = (%KeyVal);
+        undef %KeyVal;
+    }
+
+    else {
+        %{$self->{cfg}{$section}} = ();
+        my %KeyVal = ( $key => $value ); #creation de la nouvelle section
+        %{$self->{cfg}{$section}} = ( %KeyVal );
+        undef %KeyVal;
+    }
+
+    #réécriture du fichier
+    open( my $hfw_conf, ">", $self->{file} );
+
+    foreach my $SaveSection ( sort keys %{$self->{cfg}} ) {
+        my %KeyVal = %{$self->{cfg}{$SaveSection}};
+        foreach my $SaveKey ( sort keys %KeyVal ) {
+            print $hfw_conf $SaveKey."=".$KeyVal{$SaveKey}."\n";
+        }
+        undef %KeyVal;
+    }
+    close($hfw_conf);
+}
+
+sub ConfigDisplay {
     my ( $self ) = @_;
     foreach my $section (keys %{$self->{cfg}}){
         print "SECTION: ".$section."\n";
@@ -225,7 +263,7 @@ sub OptionParser {
     return $self;
 }
 
-sub AddOption {
+sub OptionAdd {
     my ( $self, $opt, $optlong, $desc, $type ) = @_;
 
     if ($opt eq "-h") {
@@ -247,39 +285,7 @@ sub AddOption {
     $self->{optorder}{$len} = $opt;
 }
 
-sub FindOptionValue {
-    my ($self, $key ) = @_;
-
-    foreach my $k ( %{$self->{options}} ) {
-        if ($self->{options}{$k}){
-            if ($self->{options}{$k} eq $key) {
-                return $k;
-            }
-        }
-    }
-    return undef;
-}
-
-sub GetOption {
-    my ( $self, $opt ) = @_;
-    my $result = "";
-
-    #teste la valeur du hash %OptValu
-    if (exists $self->{optvalu}{$opt}) {
-        $result = $self->{optvalu}{$opt};
-    }
-    else {
-        # pas de valeur dans le hash %OptValu, verifie que l'argument
-        # est bien déclaré dans le hash %Options
-        if (!(exists $self->{options}{$opt})) {
-            print "[ERREUR] l'argument $opt n'est pas defini\n";
-            exit(0);
-        }
-    }
-    return $result;
-}
-
-sub ParseOption {
+sub OptionParse {
     my ( $self, @tabargs ) = @_;
     @tabargs = @ARGV if (! @tabargs);
     my $tablen = @tabargs;
@@ -336,6 +342,79 @@ sub ParseOption {
     }
 }
 
+sub OptionFindValue {
+    my ($self, $key ) = @_;
+
+    foreach my $k ( %{$self->{options}} ) {
+        if ($self->{options}{$k}){
+            if ($self->{options}{$k} eq $key) {
+                return $k;
+            }
+        }
+    }
+    return undef;
+}
+
+sub OptionGet {
+    my ( $self, $opt ) = @_;
+    my $result = "";
+
+    #teste la valeur du hash %OptValu
+    if (exists $self->{optvalu}{$opt}) {
+        $result = $self->{optvalu}{$opt};
+    }
+    else {
+        # pas de valeur dans le hash %OptValu, verifie que l'argument
+        # est bien déclaré dans le hash %Options
+        if (!(exists $self->{options}{$opt})) {
+            print "[ERREUR] l'argument $opt n'est pas defini\n";
+            exit(0);
+        }
+    }
+    return $result;
+}
+
+#lecture-ecriture de fichier syntaxe python
+#r = read, a = append, w = write, [raw]b = binary
+sub FOpen {
+    my ( $class, $file, $mode, $encoding ) = @_;
+    my ($handle, $perlmode);
+
+    #par defaut, mode lecture
+    $perlmode = "<";
+    $perlmode = ">" if ($mode eq "w" || $mode eq "wb");
+    $perlmode = ">>" if ($mode eq "a" || $mode eq "ab");
+    $perlmode = "<" if ($mode eq "r" || $mode eq "rb");
+
+    $encoding = ":encoding( $encoding )" if ($encoding);
+
+    open( $handle, "$perlmode$encoding", $file);
+
+    my $self = bless {
+        file => $file,
+        phdl => $handle,
+        codi => $encoding,
+        mode => $mode,
+    }, $class;
+
+    return $self;
+}
+
+sub FHandle {
+    my ( $self ) = @_;
+    return $self->{phdl};
+}
+
+sub FWrite {
+    my ($self, $line) = @_;
+    print $self->{phdl} $line;
+}
+
+sub FClose {
+    my ( $self ) = @_;
+    close( $self->{phdl} );
+}
+
 ################################################
 #horodatage
 sub Timestamp {
@@ -346,7 +425,7 @@ sub Timestamp {
 
 ################################################
 # conversion l'une ligne de fichier CSV en hashtable
-sub Line2Hash {
+sub CSVLine2Hash {
     my ($line, $headerline, $separator) = @_;
     my %ResultSet = ();
     my $i = 0;
